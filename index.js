@@ -5,7 +5,7 @@ app.use(express.json());
 
 // ─── CONFIGURACIÓN ───────────────────────────────────────────
 const VERIFY_TOKEN = "generali_bot_2024";
-const PHONE_NUMBER_ID = "1106734449185257";
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
 // Horario de atención (hora España peninsular)
