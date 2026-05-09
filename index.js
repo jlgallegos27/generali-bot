@@ -9,10 +9,10 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
 // Horario de atención (hora España peninsular)
-const HORARIO_INICIO = 9;
-const HORARIO_FIN_HORA = 20;
-const HORARIO_FIN_MINUTO = 30;
-const DIAS_LABORABLES = [1, 2, 3, 4, 5]; // Lunes a viernes
+const HORARIO_INICIO = 0;
+const HORARIO_FIN_HORA = 23;
+const HORARIO_FIN_MINUTO = 59;
+const DIAS_LABORABLES = [0, 1, 2, 3, 4, 5, 6];
 
 // ─── RESPUESTAS PREDEFINIDAS POR PALABRAS CLAVE ──────────────
 const RESPUESTAS_FAQ = [
