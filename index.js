@@ -71,7 +71,8 @@ const RESPUESTAS_FAQ = [
 
 // ─── ESTADO DE CONVERSACIONES ────────────────────────────────
 const conversaciones = new Set();
-const esperandoSiniestro = new Map(); // telefono -> nivel de urgencia
+const esperandoSiniestro = new Map();
+const esperandoDocAuto = new Map(); // Para recopilar docs de siniestro de auto
 
 // ─── UTILIDADES ──────────────────────────────────────────────
 function estaEnHorario() {
@@ -83,6 +84,12 @@ function estaEnHorario() {
   const inicioMinutos = HORARIO_INICIO * 60;
   const finMinutos = HORARIO_FIN_HORA * 60 + HORARIO_FIN_MINUTO;
   return DIAS_LABORABLES.includes(dia) && totalMinutos >= inicioMinutos && totalMinutos <= finMinutos;
+}
+
+function esSiniestroAuto(texto) {
+  const textoNorm = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const palabrasAuto = ["coche", "auto", "carro", "vehiculo", "moto", "atropello", "colision", "choque", "accidente de trafico", "parte amistoso", "contrario"];
+  return palabrasAuto.some(p => textoNorm.includes(p));
 }
 
 function buscarRespuestaFAQ(texto) {
@@ -118,32 +125,62 @@ async function enviarMensaje(telefono, mensaje) {
   }
 }
 
+async function reenviarImagen(telefono, mediaId, caption) {
+  try {
+    // Obtener URL de la imagen
+    const mediaRes = await axios.get(
+      `https://graph.facebook.com/v19.0/${mediaId}`,
+      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+    );
+    const mediaUrl = mediaRes.data.url;
+
+    // Descargar la imagen
+    const imageRes = await axios.get(mediaUrl, {
+      responseType: "arraybuffer",
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
+    });
+    const imageBase64 = Buffer.from(imageRes.data).toString("base64");
+
+    // Reenviar al agente
+    await axios.post(
+      `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to: NUMERO_AGENTE,
+        type: "image",
+        image: {
+          data: imageBase64,
+          caption: caption || `📸 Imagen de siniestro de +${telefono}`
+        }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    console.log(`📸 Imagen reenviada al agente`);
+  } catch (error) {
+    console.error("❌ Error reenviando imagen:", error.response?.data || error.message);
+    // Si falla el reenvío de imagen, notificar con texto
+    await enviarMensaje(NUMERO_AGENTE, `📸 El cliente +${telefono} ha enviado una imagen de su siniestro (no se pudo reenviar automáticamente).`);
+  }
+}
+
 // ─── NOTIFICACIÓN AL AGENTE ───────────────────────────────────
-async function notificarAgente(telefono, mensaje, tipo = "nuevo") {
+async function notificarAgente(telefono, mensaje, tipo) {
   const horaES = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid" }));
   const hora = horaES.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 
-  let notificacion = "";
-  if (tipo === "nuevo") {
-    notificacion =
-      `🔔 *Nuevo cliente en el bot*\n\n` +
-      `📱 Número: +${telefono}\n` +
-      `💬 Mensaje: "${mensaje}"\n` +
-      `🕘 Hora: ${hora}`;
-  } else if (tipo === "siniestro_importante") {
-    notificacion =
-      `🟡 *Siniestro IMPORTANTE*\n\n` +
-      `📱 Número: +${telefono}\n` +
-      `📋 Descripción: "${mensaje}"\n` +
-      `🕘 Hora: ${hora}\n\n` +
-      `⚠️ El cliente necesita tu atención.`;
-  } else if (tipo === "siniestro_consulta") {
-    notificacion =
-      `🟢 *Consulta sobre siniestro*\n\n` +
-      `📱 Número: +${telefono}\n` +
-      `📋 Descripción: "${mensaje}"\n` +
-      `🕘 Hora: ${hora}`;
-  }
+  const iconos = { "nuevo": "🔔", "urgente": "🔴", "importante": "🟡", "consulta": "🟢" };
+  const titulos = { "nuevo": "Nuevo cliente en el bot", "urgente": "Siniestro URGENTE", "importante": "Siniestro IMPORTANTE", "consulta": "Consulta sobre siniestro" };
+
+  const notificacion =
+    `${iconos[tipo] || "🔔"} *${titulos[tipo] || "Notificación"}*\n\n` +
+    `📱 Número: +${telefono}\n` +
+    `💬 Descripción: "${mensaje}"\n` +
+    `🕘 Hora: ${hora}`;
 
   await enviarMensaje(NUMERO_AGENTE, notificacion);
 }
@@ -173,8 +210,49 @@ app.post("/webhook", async (req, res) => {
     const tipo = mensaje.type;
     const esAgente = telefono === NUMERO_AGENTE;
 
+    // ── MENSAJES DE VOZ ──
+    if (tipo === "audio") {
+      await enviarMensaje(telefono,
+        `🚫 *Los mensajes de voz no son válidos para gestionar tu consulta.*\n\n` +
+        `⚠️ Para que podamos atenderte correctamente y dejar constancia de tu solicitud, es *obligatorio* comunicarse mediante *mensajes de texto o imágenes*.\n\n` +
+        `Por favor, escribe tu consulta en texto. 📝\n\n` +
+        `Si necesitas ayuda, elige una opción:\n\n` +
+        `1️⃣ Información sobre seguros\n` +
+        `2️⃣ Solicitar cotización\n` +
+        `3️⃣ Realizar un pago\n` +
+        `4️⃣ Hablar con el agente\n` +
+        `5️⃣ Reportar un siniestro`
+      );
+      return;
+    }
+
+    // ── IMÁGENES (siniestro auto) ──
+    if (tipo === "image") {
+      const mediaId = mensaje.image?.id;
+      const caption = mensaje.image?.caption || "";
+
+      if (esperandoDocAuto.has(telefono)) {
+        // Reenviar imagen al agente
+        await reenviarImagen(telefono, mediaId, `📸 Siniestro auto de +${telefono}: ${caption}`);
+        await enviarMensaje(telefono,
+          `✅ Imagen recibida y enviada a tu agente. 📸\n\n` +
+          `¿Tienes más fotos o datos que añadir?\n\n` +
+          `Si has terminado escribe *"listo"* y tu agente iniciará la gestión. 😊`
+        );
+      } else {
+        await reenviarImagen(telefono, mediaId, `📸 Imagen de +${telefono}: ${caption}`);
+        await enviarMensaje(telefono, `✅ Imagen recibida y enviada a tu agente. 😊`);
+      }
+      return;
+    }
+
+    // ── OTROS TIPOS DE ARCHIVO ──
     if (tipo !== "text") {
-      await enviarMensaje(telefono, "Solo puedo procesar mensajes de texto por el momento. Escríbeme tu consulta. 😊");
+      await enviarMensaje(telefono,
+        `🚫 *Los mensajes de voz no son válidos para gestionar tu consulta.*\n\n` +
+        `⚠️ Por favor, comunícate mediante *texto escrito o imágenes* únicamente.\n\n` +
+        `Escribe tu consulta en texto. 📝`
+      );
       return;
     }
 
@@ -182,35 +260,51 @@ app.post("/webhook", async (req, res) => {
     const esNuevo = !conversaciones.has(telefono);
     console.log(`📩 [${telefono}] ${texto}`);
 
-    // ── NOTIFICAR AL AGENTE (solo primer mensaje y no es el agente) ──
+    // ── NOTIFICAR AL AGENTE (solo primer mensaje) ──
     if (esNuevo && !esAgente) {
       await notificarAgente(telefono, texto, "nuevo");
     }
 
-    // ── FLUJO DE SINIESTRO: ESPERANDO NIVEL DE URGENCIA ──
-    if (esperandoSiniestro.has(telefono) && esperandoSiniestro.get(telefono) === "nivel") {
-      if (texto === "1") {
-        esperandoSiniestro.delete(telefono);
+    // ── FLUJO DOC AUTO: ESPERANDO "LISTO" O MÁS DATOS ──
+    if (esperandoDocAuto.has(telefono)) {
+      const textoNorm = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (textoNorm.includes("listo") || textoNorm.includes("ya esta") || textoNorm.includes("es todo") || textoNorm.includes("nada mas")) {
+        esperandoDocAuto.delete(telefono);
+        await enviarMensaje(NUMERO_AGENTE, `✅ El cliente +${telefono} ha terminado de enviar documentación del siniestro de auto.`);
         await enviarMensaje(telefono,
-          `🔴 *Siniestro URGENTE*\n\n` +
-          `Llama inmediatamente a nuestro equipo de emergencias:\n\n` +
-          `📞 *911 123 443*\n_(gratuito · 24 horas · todos los días)_\n\n` +
-          `Antes de llamar, ten preparado:\n` +
-          `📋 Número de póliza\n` +
-          `📍 Lugar del siniestro\n` +
-          `📝 Descripción breve de lo ocurrido\n\n` +
-          `¡Nuestro equipo te atenderá de inmediato! 💪`
+          `✅ Perfecto, tu agente ha recibido toda la documentación y procederá con la gestión del siniestro.\n\n` +
+          `Te contactará lo antes posible. 💪\n\n` +
+          `🆘 Si la situación es urgente: *911 123 443* (24h)`
         );
-      } else if (texto === "2" || texto === "3") {
-        esperandoSiniestro.set(telefono, texto === "2" ? "desc_importante" : "desc_consulta");
+      } else {
+        // Reenviar texto con datos del contrario al agente
+        await enviarMensaje(NUMERO_AGENTE, `📋 Datos siniestro auto de +${telefono}:\n"${texto}"`);
         await enviarMensaje(telefono,
-          `${texto === "2" ? "🟡" : "🟢"} Entendido.\n\n` +
-          `Por favor descríbeme con detalle qué ha ocurrido:\n\n` +
-          `📋 ¿Qué tipo de siniestro es? (agua, incendio, robo, accidente...)\n` +
+          `✅ Datos recibidos y enviados a tu agente. 😊\n\n` +
+          `¿Tienes más información o fotos que añadir?\n` +
+          `Cuando termines escribe *"listo"*.`
+        );
+      }
+      return;
+    }
+
+    // ── FLUJO SINIESTRO: ESPERANDO NIVEL DE URGENCIA ──
+    if (esperandoSiniestro.has(telefono) && esperandoSiniestro.get(telefono) === "nivel") {
+      if (["1", "2", "3"].includes(texto)) {
+        const nivel = texto === "1" ? "urgente" : texto === "2" ? "importante" : "consulta";
+        esperandoSiniestro.set(telefono, nivel);
+
+        await enviarMensaje(telefono,
+          `${texto === "1" ? "🔴" : texto === "2" ? "🟡" : "🟢"} Entendido.\n\n` +
+          `Para que tu agente pueda gestionar y hacer el seguimiento, descríbeme:\n\n` +
+          `📋 ¿Qué tipo de siniestro es? (agua, incendio, robo, accidente de auto...)\n` +
           `📍 ¿Dónde ha ocurrido?\n` +
           `📅 ¿Cuándo ocurrió?\n` +
-          `🔍 ¿Qué daños hay?\n\n` +
-          `Tu agente revisará tu caso lo antes posible. 😊`
+          `🔍 ¿Qué daños hay?\n` +
+          `👤 Tu nombre completo\n` +
+          `🪪 Tu número de póliza (si lo tienes)\n\n` +
+          `${texto === "1" ? "⚠️ Si hay riesgo inmediato llama ya al *911 123 443* (24h)\n\n" : ""}` +
+          `⚠️ *Recuerda: solo texto e imágenes, no se admiten mensajes de voz.*`
         );
       } else {
         await enviarMensaje(telefono, "Por favor elige una opción válida:\n\n🔴 *1* - Urgente\n🟡 *2* - Importante\n🟢 *3* - Consulta");
@@ -218,24 +312,44 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    // ── FLUJO DE SINIESTRO: ESPERANDO DESCRIPCIÓN ──
+    // ── FLUJO SINIESTRO: ESPERANDO DESCRIPCIÓN ──
     if (esperandoSiniestro.has(telefono) && esperandoSiniestro.get(telefono) !== "nivel") {
-      const tipoSiniestro = esperandoSiniestro.get(telefono);
+      const nivel = esperandoSiniestro.get(telefono);
       esperandoSiniestro.delete(telefono);
 
-      if (tipoSiniestro === "desc_importante") {
-        await notificarAgente(telefono, texto, "siniestro_importante");
+      await notificarAgente(telefono, texto, nivel);
+
+      // Detectar si es siniestro de auto
+      if (esSiniestroAuto(texto)) {
+        esperandoDocAuto.set(telefono, true);
         await enviarMensaje(telefono,
-          `✅ He registrado tu siniestro y he avisado a tu agente.\n\n` +
-          `Te contactará lo antes posible.\n\n` +
-          `Si la situación empeora llama al:\n📞 *911 123 443* (24h) 🆘`
+          `✅ He registrado tu siniestro y avisado a tu agente.\n\n` +
+          `🚗 *Veo que es un siniestro de auto.* Para agilizar la gestión necesito:\n\n` +
+          `📸 *Opción A — Parte amistoso:*\nEnvíame una foto del parte amistoso firmado\n\n` +
+          `📝 *Opción B — Datos del contrario:*\n👤 Nombre completo\n🪪 DNI\n🚘 Matrícula\n🏢 Compañía aseguradora\n📋 Número de póliza\n\n` +
+          `También puedes enviar fotos de los daños del vehículo.\n\n` +
+          `⚠️ *Solo texto e imágenes, no se admiten mensajes de voz.*\n\n` +
+          `Cuando termines de enviar todo escribe *"listo"*. 😊`
         );
       } else {
-        await notificarAgente(telefono, texto, "siniestro_consulta");
-        await enviarMensaje(telefono,
-          `✅ He registrado tu consulta y he avisado a tu agente.\n\n` +
-          `Te responderá durante el horario de atención _(L-V 9h-20:30h)_. 😊`
-        );
+        if (nivel === "urgente") {
+          await enviarMensaje(telefono,
+            `✅ He registrado tu siniestro y avisado a tu agente para el seguimiento.\n\n` +
+            `🔴 *Recuerda:* Si hay riesgo activo llama ahora al:\n📞 *911 123 443* (gratuito · 24h)\n\n` +
+            `Tu agente contactará contigo lo antes posible. 💪`
+          );
+        } else if (nivel === "importante") {
+          await enviarMensaje(telefono,
+            `✅ He registrado tu siniestro y avisado a tu agente para hacer el seguimiento.\n\n` +
+            `Te contactará lo antes posible.\n\n` +
+            `Si la situación empeora: 📞 *911 123 443* (24h) 🆘`
+          );
+        } else {
+          await enviarMensaje(telefono,
+            `✅ He registrado tu consulta y avisado a tu agente.\n\n` +
+            `Te responderá durante el horario de atención _(L-V 9h-20:30h)_. 😊`
+          );
+        }
       }
       return;
     }
@@ -246,6 +360,7 @@ app.post("/webhook", async (req, res) => {
       await enviarMensaje(telefono,
         `👋 ¡Hola! Bienvenido/a al asistente de tu agente de *Generali Seguros*.\n\n` +
         `Estoy aquí para ayudarte 24/7. Tu agente atiende personalmente de *L-V de 9h a 20:30h*.\n\n` +
+        `⚠️ *Importante: solo se admiten mensajes de texto e imágenes. Los mensajes de voz no son válidos.*\n\n` +
         `¿Cómo puedo ayudarte?\n\n` +
         `1️⃣ Información sobre seguros\n` +
         `2️⃣ Solicitar cotización\n` +
@@ -257,25 +372,26 @@ app.post("/webhook", async (req, res) => {
     }
 
     // ── MENÚ RÁPIDO ──
-    const menus = {
-      "1": "¿Sobre qué tipo de seguro necesitas información?\n\n🏠 *Hogar* · 🚗 *Auto* · ❤️ *Vida* · 🏥 *Salud* · 🦷 *Dental* · 🏢 *Empresas* · 💰 *Ahorro*\n\nEscríbeme el que te interese y te cuento todo.",
-      "2": "📋 *Solicitar cotización*\n\nDime qué tipo de seguro te interesa y te indico exactamente qué documentación necesitamos:\n\n🏠 Hogar · 🚗 Auto · ❤️ Vida · 🏥 Salud · 🏢 Empresas · 💰 Ahorro",
-      "3": "💳 *Pago de tu seguro Generali*\n\nPuedes realizar tu pago de forma fácil, rápida y segura:\n\n*Pasos a seguir:*\n1️⃣ Entra en el siguiente enlace:\n🔗 https://www.generali.es/servicios-generali/pago-con-tarjeta/pasarela\n\n2️⃣ Introduce tu *número de recibo* (lo encuentras en tu carta de pago)\n\n3️⃣ Elige tu forma de pago:\n📱 *Bizum*\n💳 *Tarjeta bancaria*\n\n✅ El pago es 100% seguro y recibirás confirmación inmediata.\n\nSi tienes cualquier problema escríbeme y te ayudo. 😊",
-      "4": "Perfecto, voy a avisar a tu agente ahora mismo. ⏳\n\n¿Puedes indicarme tu *nombre* y el *motivo* de la consulta para que pueda prepararse?\n\n🕘 Tu agente atiende de *L-V de 9h a 20:30h*",
-      "5": null // Se maneja abajo
-    };
-
     if (texto === "5" || texto.toLowerCase().includes("siniestro") || texto.toLowerCase().includes("accidente") || texto.toLowerCase().includes("urgente")) {
       esperandoSiniestro.set(telefono, "nivel");
+      if (!conversaciones.has(telefono)) conversaciones.add(telefono);
       await enviarMensaje(telefono,
         `🆘 *Reportar un siniestro*\n\n` +
         `Para atenderte mejor, dime el nivel de urgencia:\n\n` +
-        `🔴 *1 - URGENTE*\nDaños activos, heridos o riesgo inmediato\n→ Te daremos el teléfono de emergencias\n\n` +
-        `🟡 *2 - IMPORTANTE*\nDaño ya ocurrido, sin riesgo activo\n→ Tu agente te contactará pronto\n\n` +
-        `🟢 *3 - CONSULTA*\nDudas sobre cobertura o tramitación\n→ Tu agente te responderá en horario de atención`
+        `🔴 *1 - URGENTE*\nDaños activos, heridos o riesgo inmediato\n\n` +
+        `🟡 *2 - IMPORTANTE*\nDaño ya ocurrido, sin riesgo activo\n\n` +
+        `🟢 *3 - CONSULTA*\nDudas sobre cobertura o tramitación\n\n` +
+        `⚠️ *Solo texto e imágenes, no se admiten mensajes de voz.*`
       );
       return;
     }
+
+    const menus = {
+      "1": "¿Sobre qué tipo de seguro necesitas información?\n\n🏠 *Hogar* · 🚗 *Auto* · ❤️ *Vida* · 🏥 *Salud* · 🦷 *Dental* · 🏢 *Empresas* · 💰 *Ahorro*\n\nEscríbeme el que te interese y te cuento todo.",
+      "2": "📋 *Solicitar cotización*\n\nDime qué tipo de seguro te interesa y te indico exactamente qué documentación necesitamos:\n\n🏠 Hogar · 🚗 Auto · ❤️ Vida · 🏥 Salud · 🏢 Empresas · 💰 Ahorro",
+      "3": "💳 *Pago de tu seguro Generali*\n\nPuedes realizar tu pago de forma fácil, rápida y segura:\n\n1️⃣ Entra en:\n🔗 https://www.generali.es/servicios-generali/pago-con-tarjeta/pasarela\n\n2️⃣ Introduce tu *número de recibo*\n\n3️⃣ Elige:\n📱 *Bizum* o 💳 *Tarjeta bancaria*\n\n✅ Pago 100% seguro con confirmación inmediata. 😊",
+      "4": "Perfecto, voy a avisar a tu agente ahora mismo. ⏳\n\n¿Puedes indicarme tu *nombre* y el *motivo* de la consulta para que pueda prepararse?\n\n🕘 Tu agente atiende de *L-V de 9h a 20:30h*\n\n⚠️ *Solo texto, no se admiten mensajes de voz.*",
+    };
 
     if (menus[texto]) {
       await enviarMensaje(telefono, menus[texto]);
