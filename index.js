@@ -260,9 +260,17 @@ app.post("/webhook", async (req, res) => {
     const esNuevo = !conversaciones.has(telefono);
     console.log(`📩 [${telefono}] ${texto}`);
 
-    // ── NOTIFICAR AL AGENTE (solo primer mensaje) ──
-    if (esNuevo && !esAgente) {
-      await notificarAgente(telefono, texto, "nuevo");
+    // ── ESPEJO: REENVIAR TODOS LOS MENSAJES AL AGENTE ──
+    if (!esAgente) {
+      const horaES = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid" }));
+      const hora = horaES.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+      await enviarMensaje(NUMERO_AGENTE,
+        `📩 *Mensaje de cliente*
+
+📱 +${telefono}
+💬 "${texto}"
+🕘 ${hora}`
+      );
     }
 
     // ── FLUJO DOC AUTO: ESPERANDO "LISTO" O MÁS DATOS ──
