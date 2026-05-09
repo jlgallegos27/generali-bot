@@ -8,7 +8,7 @@ const VERIFY_TOKEN = "generali_bot_2024";
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
-// Horario de atención (hora España peninsular)
+// Bot funciona 24/7
 const HORARIO_INICIO = 0;
 const HORARIO_FIN_HORA = 23;
 const HORARIO_FIN_MINUTO = 59;
@@ -18,39 +18,51 @@ const DIAS_LABORABLES = [0, 1, 2, 3, 4, 5, 6];
 const RESPUESTAS_FAQ = [
   {
     palabras: ["hogar", "casa", "vivienda", "piso", "apartamento"],
-    respuesta: "🏠 *Seguro de Hogar Generali*\n\nNuestro seguro de hogar cubre daños por agua, incendio, robo, responsabilidad civil y mucho más.\n\nPara una cotización personalizada dime tu nombre y teléfono y tu agente te contactará enseguida. 😊"
+    respuesta: "🏠 *Seguro de Hogar Generali*\n\nNuestro seguro de hogar cubre daños por agua, incendio, robo, responsabilidad civil y mucho más.\n\nPara prepararte una cotización personalizada necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n📐 Metros cuadrados\n🏘️ ¿Piso o casa?\n\nEnvíame estos datos y tu agente te preparará la mejor oferta. 😊"
   },
   {
-    palabras: ["auto", "coche", "carro", "vehículo", "moto", "automóvil"],
-    respuesta: "🚗 *Seguro de Auto Generali*\n\nOfrecemos coberturas a terceros, todo riesgo y modalidades intermedias adaptadas a tu perfil.\n\nPara una cotización personalizada dime tu nombre y teléfono y tu agente te contactará enseguida. 😊"
+    palabras: ["auto", "coche", "carro", "vehículo", "vehiculo", "moto", "automóvil", "automovil"],
+    respuesta: "🚗 *Seguro de Auto Generali*\n\nOfrecemos coberturas a terceros, todo riesgo y modalidades intermedias adaptadas a tu perfil.\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n🚘 Marca, modelo y año del vehículo\n📋 Matrícula\n\n📸 Documentación:\n📷 DNI (anverso y reverso)\n📷 Permiso de conducir (anverso y reverso)\n📷 Ficha técnica\n📷 Permiso de circulación\n📷 Póliza anterior (si tienes)\n\n⚠️ Tus datos son tratados con total confidencialidad conforme a la LOPD. 😊"
   },
   {
     palabras: ["vida", "fallecimiento", "muerte", "deceso", "supervivencia"],
-    respuesta: "❤️ *Seguro de Vida Generali*\n\nProtege a tu familia con nuestros seguros de vida. Disponemos de distintas modalidades según tus necesidades y presupuesto.\n\nPara una cotización personalizada dime tu nombre y teléfono y tu agente te contactará enseguida. 😊"
+    respuesta: "❤️ *Seguro de Vida Generali*\n\nProtege a tu familia con nuestros seguros de vida. Disponemos de distintas modalidades según tus necesidades y presupuesto.\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n💰 Capital que deseas asegurar\n\nEnvíame estos datos y tu agente te preparará varias opciones. 😊"
   },
   {
-    palabras: ["salud", "médico", "médica", "sanitario", "hospital", "dental"],
-    respuesta: "🏥 *Seguro de Salud Generali*\n\nAccede a los mejores especialistas sin listas de espera. Incluye cobertura dental, hospitalización y mucho más.\n\nPara una cotización personalizada dime tu nombre y teléfono y tu agente te contactará enseguida. 😊"
+    palabras: ["dental", "dentista", "dientes", "boca", "ortodoncia"],
+    respuesta: "🦷 *Cobertura Dental Generali*\n\nConsulta nuestra red de dentistas colaboradores:\n\n🔗 https://generali-dental.dentycard.es/clientes/landing\n\nPara incluir cobertura dental en tu seguro de salud necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n👨‍👩‍👧 ¿Es solo para ti o también para familiares?\n\nEnvíame estos datos y tu agente te preparará la mejor opción. 😊"
   },
   {
-    palabras: ["empresa", "negocio", "pyme", "comercio", "local", "oficina"],
-    respuesta: "🏢 *Seguro de Empresas Generali*\n\nProtege tu negocio con coberturas adaptadas: responsabilidad civil, daños materiales, pérdida de beneficios y más.\n\nPara una cotización personalizada dime tu nombre y teléfono y tu agente te contactará enseguida. 😊"
+    palabras: ["salud", "médico", "medico", "médica", "medica", "sanitario", "hospital", "especialista"],
+    respuesta: "🏥 *Seguro de Salud Generali*\n\nAccede a los mejores especialistas sin listas de espera.\n\n🔗 Consulta el cuadro médico completo:\nhttps://www.generali.es/cuadromedico\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n👨‍👩‍👧 ¿Es solo para ti o también para familiares?\n\nEnvíame estos datos y tu agente te contactará enseguida. 😊"
   },
   {
-    palabras: ["ahorro", "inversión", "plan", "jubilación", "pensión", "futuro"],
-    respuesta: "💰 *Seguros de Ahorro e Inversión Generali*\n\nPlanifica tu futuro con nuestros productos de ahorro y jubilación, con rentabilidad garantizada y ventajas fiscales.\n\nPara una cotización personalizada dime tu nombre y teléfono y tu agente te contactará enseguida. 😊"
+    palabras: ["empresa", "negocio", "pyme", "comercio", "local", "oficina", "autonomo", "autónomo"],
+    respuesta: "🏢 *Seguro de Empresas Generali*\n\nProtege tu negocio con coberturas adaptadas: responsabilidad civil, daños materiales, pérdida de beneficios y más.\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección del negocio\n🏭 Actividad de la empresa\n👥 Número de empleados\n\nEnvíame estos datos y tu agente te contactará enseguida. 😊"
+  },
+  {
+    palabras: ["ahorro", "inversión", "inversion", "plan", "jubilación", "jubilacion", "pensión", "pension", "futuro"],
+    respuesta: "💰 *Seguros de Ahorro e Inversión Generali*\n\nPlanifica tu futuro con rentabilidad garantizada y ventajas fiscales.\n\nPara prepararte una propuesta personalizada necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n💰 Cantidad que deseas ahorrar mensualmente\n\nEnvíame estos datos y tu agente te contactará enseguida. 😊"
+  },
+  {
+    palabras: ["pago", "recibo", "factura", "cobro", "bizum", "tarjeta"],
+    respuesta: "💳 *Pago de tu seguro Generali*\n\nPuedes realizar tu pago de forma fácil, rápida y segura:\n\n*Pasos a seguir:*\n1️⃣ Entra en el siguiente enlace:\n🔗 https://www.generali.es/servicios-generali/pago-con-tarjeta/pasarela\n\n2️⃣ Introduce tu *número de recibo* (lo encuentras en tu carta de pago)\n\n3️⃣ Elige tu forma de pago:\n📱 *Bizum*\n💳 *Tarjeta bancaria*\n\n✅ El pago es 100% seguro y recibirás confirmación inmediata.\n\nSi tienes cualquier problema escríbeme y te ayudo. 😊"
+  },
+  {
+    palabras: ["cuadro", "medicos", "médicos", "especialistas", "clinica", "clínica"],
+    respuesta: "🏥 *Cuadro Médico Generali*\n\n🔗 Médicos y especialistas:\nhttps://www.generali.es/cuadromedico\n\n🦷 Dentistas:\nhttps://generali-dental.dentycard.es/clientes/landing\n\nSi necesitas ayuda para encontrar un especialista en tu zona, dímelo y te ayudo. 😊"
   },
   {
     palabras: ["precio", "coste", "costo", "cuánto", "cuanto", "presupuesto", "cotización", "cotizacion"],
-    respuesta: "📋 *Solicitar cotización*\n\nCon mucho gusto preparamos un presupuesto personalizado para ti.\n\nPor favor dime:\n• ¿Qué tipo de seguro te interesa?\n• Tu nombre\n• Tu teléfono de contacto\n\nTu agente te llamará lo antes posible. 😊"
+    respuesta: "📋 *Solicitar cotización*\n\nCon mucho gusto preparamos un presupuesto personalizado.\n\nDime primero:\n¿Qué tipo de seguro te interesa?\n\n🏠 Hogar · 🚗 Auto · ❤️ Vida · 🏥 Salud · 🏢 Empresas · 💰 Ahorro\n\nAsí te indico exactamente qué documentación necesitamos. 😊"
   },
   {
     palabras: ["siniestro", "accidente", "daño", "urgente", "emergencia", "robo"],
-    respuesta: "🆘 *Reportar un siniestro*\n\nPara siniestros urgentes llama inmediatamente a:\n\n📞 *911 123 443*\n_(gratuito · 24 horas · todos los días)_\n\nNuestro equipo te atenderá de inmediato."
+    respuesta: "🆘 *Reportar un siniestro*\n\nPara siniestros urgentes llama inmediatamente a:\n\n📞 *911 123 443*\n_(gratuito · 24 horas · todos los días)_\n\nSi prefieres que lo gestione yo, necesito:\n👤 Nombre completo\n🪪 DNI\n📍 Dirección\n📋 Descripción del siniestro\n\n💪 Dímelo y lo tramitamos juntos."
   },
   {
     palabras: ["horario", "hora", "cuando", "cuándo", "disponible", "atención", "atencion"],
-    respuesta: "🕘 *Horario de atención*\n\nEstamos disponibles:\n📅 Lunes a Viernes\n⏰ 9:00h a 20:30h\n\nFuera de este horario puedes dejarnos tu mensaje y te responderemos en cuanto abramos. 😊"
+    respuesta: "🕘 *Horario de atención*\n\nTu agente está disponible:\n📅 Lunes a Viernes\n⏰ 9:00h a 20:30h\n\nEste asistente está disponible *24 horas, 7 días a la semana* para ayudarte. 😊"
   },
   {
     palabras: ["gracias", "ok", "vale", "perfecto", "genial", "bien"],
@@ -142,20 +154,10 @@ app.post("/webhook", async (req, res) => {
     // ── BIENVENIDA ──
     if (esNuevo) {
       conversaciones.add(telefono);
-
-      if (!estaEnHorario()) {
-        await enviarMensaje(telefono,
-          `👋 ¡Hola! Bienvenido/a al asistente de *Generali Seguros*.\n\n` +
-          `Ahora mismo estamos fuera de horario _(L-V, 9h-20:30h)_.\n\n` +
-          `Escríbeme tu consulta y tu agente te responderá en cuanto abramos. 📝\n\n` +
-          `🆘 Para siniestros urgentes: *911 123 443* (24h)`
-        );
-        return;
-      }
-
       await enviarMensaje(telefono,
         `👋 ¡Hola! Bienvenido/a al asistente de tu agente de *Generali Seguros*.\n\n` +
-        `Estoy aquí para ayudarte con cualquier consulta. ¿Cómo puedo ayudarte?\n\n` +
+        `Estoy aquí para ayudarte 24/7. Tu agente atiende personalmente de *L-V de 9h a 20:30h*.\n\n` +
+        `¿Cómo puedo ayudarte?\n\n` +
         `1️⃣ Información sobre seguros\n` +
         `2️⃣ Solicitar cotización\n` +
         `3️⃣ Hablar con el agente\n` +
@@ -166,24 +168,14 @@ app.post("/webhook", async (req, res) => {
 
     // ── MENÚ RÁPIDO ──
     const menus = {
-      "1": "¿Sobre qué tipo de seguro necesitas información?\n\n🏠 *Hogar* · 🚗 *Auto* · ❤️ *Vida* · 🏥 *Salud* · 🏢 *Empresas* · 💰 *Ahorro*\n\nEscríbeme el que te interese y te cuento todo.",
-      "2": "📋 *Solicitar cotización*\n\nCon mucho gusto preparamos un presupuesto personalizado.\n\nPor favor dime:\n• ¿Qué tipo de seguro te interesa?\n• Tu nombre\n• Tu teléfono de contacto\n\nTu agente te llamará lo antes posible. 😊",
-      "3": "Perfecto, voy a avisar a tu agente ahora mismo. ⏳\n\n¿Puedes indicarme tu *nombre* y el *motivo* de la consulta para que pueda prepararse?",
+      "1": "¿Sobre qué tipo de seguro necesitas información?\n\n🏠 *Hogar* · 🚗 *Auto* · ❤️ *Vida* · 🏥 *Salud* · 🦷 *Dental* · 🏢 *Empresas* · 💰 *Ahorro*\n\nEscríbeme el que te interese y te cuento todo.",
+      "2": "📋 *Solicitar cotización*\n\nDime qué tipo de seguro te interesa y te indico exactamente qué documentación necesitamos:\n\n🏠 Hogar · 🚗 Auto · ❤️ Vida · 🏥 Salud · 🏢 Empresas · 💰 Ahorro",
+      "3": "Perfecto, voy a avisar a tu agente ahora mismo. ⏳\n\n¿Puedes indicarme tu *nombre* y el *motivo* de la consulta para que pueda prepararse?\n\n🕘 Tu agente atiende de *L-V de 9h a 20:30h*",
       "4": "🆘 *Para reportar un siniestro llama a:*\n\n📞 *911 123 443*\n_(gratuito · disponible 24 horas · todos los días)_\n\nNuestro equipo de siniestros te atenderá de inmediato.",
     };
 
     if (menus[texto]) {
       await enviarMensaje(telefono, menus[texto]);
-      return;
-    }
-
-    // ── FUERA DE HORARIO ──
-    if (!estaEnHorario()) {
-      await enviarMensaje(telefono,
-        `⏰ Ahora estamos fuera de horario _(L-V, 9h-20:30h)_.\n\n` +
-        `He registrado tu consulta y tu agente te responderá en cuanto abramos. 📝\n\n` +
-        `🆘 Para urgencias: *911 123 443* (24h)`
-      );
       return;
     }
 
@@ -213,7 +205,7 @@ app.post("/webhook", async (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     status: "✅ Bot Generali Seguros activo",
-    horario: estaEnHorario() ? "🟢 Dentro de horario" : "🔴 Fuera de horario",
+    modo: "🟢 24/7 activo",
     timestamp: new Date().toISOString()
   });
 });
