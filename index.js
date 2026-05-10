@@ -8,8 +8,13 @@ const VERIFY_TOKEN = "generali_bot_2024";
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-// FIX 1: modelo correcto según instrucciones (variable de entorno o fallback)
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+
+// ─── GOOGLE DRIVE ─────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
+const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 const NUMERO_AGENTE = "34617722673";
 
@@ -18,7 +23,7 @@ const HORARIO_FIN_HORA = 23;
 const HORARIO_FIN_MINUTO = 59;
 const DIAS_LABORABLES = [0, 1, 2, 3, 4, 5, 6];
 
-// FIX 2: import correcto — desestructurar lo que realmente exporta productsData.js
+// ─── IMPORTS ─────────────────────────────────────────────────
 const {
   PRODUCTS_DATA,
   detectarProducto,
@@ -29,10 +34,10 @@ const {
 const conversaciones = new Set();
 const esperandoSiniestro = new Map();
 const esperandoDocAuto = new Map();
-const contextoConversaciones = new Map(); // telefono → { productoId, mensajes, actualizado }
+const contextoConversaciones = new Map();
 
-// ─── RESPUESTAS PREDEFINIDAS POR PALABRAS CLAVE ──────────────
-// SOLO para operaciones directas: pagos, cuadro médico, horario.
+// ─── RESPUESTAS FAQ ───────────────────────────────────────────
+// Solo para operaciones directas: pagos, cuadro médico, horario.
 // Todo lo relacionado con productos va a la IA.
 const RESPUESTAS_FAQ = [
   {
@@ -58,22 +63,11 @@ function normalizarTexto(texto = "") {
   return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-function estaEnHorario() {
-  const horaES = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid" }));
-  const hora = horaES.getHours();
-  const minuto = horaES.getMinutes();
-  const dia = horaES.getDay();
-  const totalMinutos = hora * 60 + minuto;
-  return DIAS_LABORABLES.includes(dia) &&
-    totalMinutos >= HORARIO_INICIO * 60 &&
-    totalMinutos <= HORARIO_FIN_HORA * 60 + HORARIO_FIN_MINUTO;
-}
-
 function esSiniestroAuto(texto) {
   const textoNorm = normalizarTexto(texto);
-  const palabrasAuto = ["coche", "auto", "carro", "vehiculo", "moto", "atropello",
-    "colision", "choque", "accidente de trafico", "parte amistoso", "contrario"];
-  return palabrasAuto.some(p => textoNorm.includes(p));
+  return ["coche", "auto", "carro", "vehiculo", "moto", "atropello",
+    "colision", "choque", "accidente de trafico", "parte amistoso", "contrario"]
+    .some(p => textoNorm.includes(p));
 }
 
 function buscarRespuestaFAQ(texto) {
@@ -92,13 +86,13 @@ function esPreguntaCompleja(texto) {
     "diferencia", "comparar", "requisito", "puedo", "tengo derecho",
     "que pasa", "como funciona", "me conviene", "esta cubierto",
     "maternidad", "hospitalizacion", "rehabilitacion", "robo", "agua", "incendio",
-    "lunas", "baja", "accidente"
+    "lunas", "baja", "accidente", "cuesta", "precio", "coste", "informacion", "cuales"
   ];
-  return texto.length >= 35 || texto.includes("?") ||
+  return texto.length >= 25 || texto.includes("?") ||
     indicadores.some(palabra => textoNorm.includes(palabra));
 }
 
-// ─── MEMORIA CORTA DE CONVERSACIÓN ───────────────────────────
+// ─── MEMORIA CORTA ────────────────────────────────────────────
 function obtenerContextoConversacion(telefono) {
   return contextoConversaciones.get(telefono) || { productoId: null, mensajes: [] };
 }
@@ -109,8 +103,7 @@ function guardarTurnoConversacion(telefono, productoId, pregunta, respuesta) {
     ...contexto.mensajes,
     { role: "user", content: pregunta },
     { role: "assistant", content: respuesta }
-  ].slice(-8); // máximo 4 turnos
-
+  ].slice(-8);
   contextoConversaciones.set(telefono, {
     productoId: productoId || contexto.productoId,
     mensajes,
@@ -119,9 +112,86 @@ function guardarTurnoConversacion(telefono, productoId, pregunta, respuesta) {
 }
 
 function limpiarContextosAntiguos() {
-  const limite = Date.now() - 60 * 60 * 1000; // 1 hora
+  const limite = Date.now() - 60 * 60 * 1000;
   for (const [telefono, contexto] of contextoConversaciones.entries()) {
     if ((contexto.actualizado || 0) < limite) contextoConversaciones.delete(telefono);
+  }
+}
+
+// ─── GOOGLE DRIVE: OBTENER ACCESS TOKEN ──────────────────────
+async function obtenerAccessTokenDrive() {
+  try {
+    const response = await axios.post("https://oauth2.googleapis.com/token", {
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: GOOGLE_REFRESH_TOKEN,
+      grant_type: "refresh_token"
+    });
+    return response.data.access_token;
+  } catch (error) {
+    console.error("❌ Error obteniendo access token Drive:", error.response?.data || error.message);
+    return null;
+  }
+}
+
+// ─── GOOGLE DRIVE: SUBIR IMAGEN ──────────────────────────────
+async function subirImagenDrive(imageBuffer, nombreArchivo, mimeType = "image/jpeg") {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
+    console.warn("⚠️ Google Drive no configurado");
+    return null;
+  }
+
+  try {
+    const accessToken = await obtenerAccessTokenDrive();
+    if (!accessToken) return null;
+
+    // Metadata del archivo
+    const metadata = {
+      name: nombreArchivo,
+      parents: GOOGLE_DRIVE_FOLDER_ID ? [GOOGLE_DRIVE_FOLDER_ID] : []
+    };
+
+    // Subir con multipart
+    const boundary = "boundary_generali_bot";
+    const metadataPart = JSON.stringify(metadata);
+
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`),
+      Buffer.from(metadataPart),
+      Buffer.from(`\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+      imageBuffer,
+      Buffer.from(`\r\n--${boundary}--`)
+    ]);
+
+    const response = await axios.post(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+      body,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+          "Content-Length": body.length
+        },
+        timeout: 30000
+      }
+    );
+
+    const fileId = response.data.id;
+    const webViewLink = response.data.webViewLink;
+
+    // Hacer el archivo público para poder compartir el enlace
+    await axios.post(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/permissions`,
+      { role: "reader", type: "anyone" },
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    console.log(`📁 Foto subida a Drive: ${nombreArchivo}`);
+    return `https://drive.google.com/file/d/${fileId}/view`;
+
+  } catch (error) {
+    console.error("❌ Error subiendo a Drive:", error.response?.data || error.message);
+    return null;
   }
 }
 
@@ -158,12 +228,10 @@ async function consultarAnthropic(instrucciones, mensajes) {
   }
 }
 
-// FIX 3: consultarIA recibe productoId (string) y usa obtenerContextoProducto del módulo
 async function consultarIA(productoId, pregunta, historial = []) {
-  // FIX 3a: usar obtenerContextoProducto() del módulo para construir el contexto
   const contextoProducto = obtenerContextoProducto(productoId);
   if (!contextoProducto) {
-    console.warn(`⚠️ Producto no encontrado en productsData: ${productoId}`);
+    console.warn(`⚠️ Producto no encontrado: ${productoId}`);
     return null;
   }
 
@@ -173,7 +241,6 @@ async function consultarIA(productoId, pregunta, historial = []) {
     `Eres el asistente de WhatsApp de Juan Luis Gallegos, agente exclusivo de Generali Seguros en Córdoba.\n` +
     `Responde solo con la información del producto facilitada como contexto. No inventes coberturas, precios, límites ni condiciones.\n` +
     `Si el contexto no permite responder con seguridad, dilo claramente y ofrece que el agente revise el caso.\n` +
-    `Puedes usar el historial reciente solo para entender referencias como "ese seguro", "y eso", "la carencia" o "el anterior".\n` +
     `Usa español de España, tono profesional y cercano, y formato breve apto para WhatsApp (máximo 5 puntos o frases).\n\n` +
     `Producto: ${nombreProducto}\n\n` +
     `Contexto del producto:\n${contextoProducto}`;
@@ -203,63 +270,79 @@ async function enviarMensaje(telefono, mensaje) {
         },
       }
     );
-    console.log(`✉️  Mensaje enviado a ${telefono}`);
+    console.log(`✉️  Enviado a ${telefono}`);
   } catch (error) {
     console.error("❌ Error enviando mensaje:", error.response?.data || error.message);
   }
 }
 
-async function reenviarImagen(telefono, mediaId, caption) {
+// ─── PROCESAR IMAGEN: DESCARGA + DRIVE + NOTIFICACIÓN ────────
+async function procesarImagen(telefono, mediaId, caption, esSiniestro = false) {
   try {
+    // 1. Obtener URL de la imagen desde Meta
     const mediaRes = await axios.get(
       `https://graph.facebook.com/v19.0/${mediaId}`,
       { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
     );
-    const imageRes = await axios.get(mediaRes.data.url, {
+    const mediaUrl = mediaRes.data.url;
+
+    // 2. Descargar la imagen
+    const imageRes = await axios.get(mediaUrl, {
       responseType: "arraybuffer",
       headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
     });
-    const imageBase64 = Buffer.from(imageRes.data).toString("base64");
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: NUMERO_AGENTE,
-        type: "image",
-        image: { data: imageBase64, caption: caption || `📸 Imagen de siniestro de +${telefono}` }
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    console.log(`📸 Imagen reenviada al agente`);
+    const imageBuffer = Buffer.from(imageRes.data);
+
+    // 3. Subir a Google Drive
+    const fecha = new Date().toLocaleString("es-ES", { timeZone: "Europe/Madrid" })
+      .replace(/[/:,\s]/g, "-");
+    const tipo = esSiniestro ? "Siniestro" : "Foto";
+    const nombreArchivo = `${tipo}_${telefono}_${fecha}.jpg`;
+
+    const urlDrive = await subirImagenDrive(imageBuffer, nombreArchivo);
+
+    // 4. Notificar al agente
+    if (urlDrive) {
+      await enviarMensaje(NUMERO_AGENTE,
+        `📸 *${tipo} de cliente*\n\n` +
+        `📱 +${telefono}\n` +
+        `${caption ? `💬 "${caption}"\n` : ""}` +
+        `📁 *Ver en Drive:*\n${urlDrive}`
+      );
+    } else {
+      await enviarMensaje(NUMERO_AGENTE,
+        `📸 *${tipo} de cliente* +${telefono}\n` +
+        `${caption ? `💬 "${caption}"\n` : ""}` +
+        `⚠️ No se pudo subir a Drive automáticamente.`
+      );
+    }
+
+    return urlDrive;
   } catch (error) {
-    console.error("❌ Error reenviando imagen:", error.response?.data || error.message);
-    await enviarMensaje(NUMERO_AGENTE, `📸 El cliente +${telefono} ha enviado una imagen de su siniestro (no se pudo reenviar automáticamente).`);
+    console.error("❌ Error procesando imagen:", error.message);
+    await enviarMensaje(NUMERO_AGENTE,
+      `📸 El cliente +${telefono} ha enviado una imagen (no se pudo procesar automáticamente).`
+    );
+    return null;
   }
 }
 
 async function notificarAgente(telefono, mensaje, tipo) {
-  const horaES = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid" }));
-  const hora = horaES.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
-  const iconos = { "urgente": "🔴", "importante": "🟡", "consulta": "🟢" };
-  const titulos = { "urgente": "Siniestro URGENTE", "importante": "Siniestro IMPORTANTE", "consulta": "Consulta sobre siniestro" };
+  const hora = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid" }))
+    .toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+  const iconos  = { urgente: "🔴", importante: "🟡", consulta: "🟢" };
+  const titulos = { urgente: "Siniestro URGENTE", importante: "Siniestro IMPORTANTE", consulta: "Consulta sobre siniestro" };
   await enviarMensaje(NUMERO_AGENTE,
     `${iconos[tipo] || "🔔"} *${titulos[tipo] || "Notificación"}*\n\n` +
-    `📱 Número: +${telefono}\n💬 Descripción: "${mensaje}"\n🕘 Hora: ${hora}`
+    `📱 Número: +${telefono}\n💬 "${mensaje}"\n🕘 ${hora}`
   );
 }
 
-// ─── WEBHOOK: VERIFICACIÓN DE META ───────────────────────────
+// ─── WEBHOOK: VERIFICACIÓN META ───────────────────────────────
 app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+  const { "hub.mode": mode, "hub.verify_token": token, "hub.challenge": challenge } = req.query;
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verificado por Meta");
+    console.log("✅ Webhook verificado");
     res.status(200).send(challenge);
   } else {
     res.sendStatus(403);
@@ -275,17 +358,15 @@ app.post("/webhook", async (req, res) => {
     if (!mensaje) return;
 
     const telefono = mensaje.from;
-    const tipo = mensaje.type;
+    const tipo     = mensaje.type;
     const esAgente = telefono === NUMERO_AGENTE;
 
-    // ── MENSAJES DE VOZ ──
+    // ── AUDIO ──
     if (tipo === "audio") {
       await enviarMensaje(telefono,
-        `🚫 *Los mensajes de voz no son válidos para gestionar tu consulta.*\n\n` +
-        `⚠️ Para que podamos atenderte correctamente y dejar constancia de tu solicitud, es *obligatorio* comunicarse mediante *mensajes de texto o imágenes*.\n\n` +
-        `Por favor, escribe tu consulta en texto. 📝\n\n` +
-        `Si necesitas ayuda, elige una opción:\n\n` +
-        `1️⃣ Información sobre seguros\n2️⃣ Solicitar cotización\n3️⃣ Realizar un pago\n4️⃣ Hablar con el agente\n5️⃣ Reportar un siniestro`
+        "🚫 *Los mensajes de voz no son válidos.*\n\n" +
+        "Por favor escribe tu consulta en texto. 📝\n\n" +
+        "1️⃣ Información · 2️⃣ Cotización · 3️⃣ Pago · 4️⃣ Agente · 5️⃣ Siniestro"
       );
       return;
     }
@@ -294,115 +375,107 @@ app.post("/webhook", async (req, res) => {
     if (tipo === "image") {
       const mediaId = mensaje.image?.id;
       const caption = mensaje.image?.caption || "";
-      if (esperandoDocAuto.has(telefono)) {
-        await reenviarImagen(telefono, mediaId, `📸 Siniestro auto de +${telefono}: ${caption}`);
+      const esSiniestro = esperandoDocAuto.has(telefono);
+
+      const urlDrive = await procesarImagen(telefono, mediaId, caption, esSiniestro);
+
+      if (esSiniestro) {
         await enviarMensaje(telefono,
-          `✅ Imagen recibida y enviada a tu agente. 📸\n\n` +
+          `✅ Foto recibida y guardada. 📸\n\n` +
           `¿Tienes más fotos o datos que añadir?\n\n` +
-          `Si has terminado escribe *"listo"* y tu agente iniciará la gestión. 😊`
+          `Cuando termines escribe *listo*. 😊`
         );
       } else {
-        await reenviarImagen(telefono, mediaId, `📸 Imagen de +${telefono}: ${caption}`);
-        await enviarMensaje(telefono, `✅ Imagen recibida y enviada a tu agente. 😊`);
+        await enviarMensaje(telefono, "✅ Imagen recibida y enviada a tu agente. 😊");
       }
       return;
     }
 
-    // ── OTROS TIPOS DE ARCHIVO ──
+    // ── OTROS TIPOS ──
     if (tipo !== "text") {
       await enviarMensaje(telefono,
-        `🚫 *Los mensajes de voz no son válidos para gestionar tu consulta.*\n\n` +
-        `⚠️ Por favor, comunícate mediante *texto escrito o imágenes* únicamente.\n\n` +
-        `Escribe tu consulta en texto. 📝`
+        "🚫 Solo se admiten *texto e imágenes*. Por favor escribe tu consulta. 📝"
       );
       return;
     }
 
-    const texto = mensaje.text.body.trim();
+    const texto   = mensaje.text.body.trim();
     const esNuevo = !conversaciones.has(telefono);
     console.log(`📩 [${telefono}] ${texto}`);
 
-    // ── ESPEJO: REENVIAR TODOS LOS MENSAJES AL AGENTE ──
+    // ── ESPEJO AL AGENTE ──
     if (!esAgente) {
-      const horaES = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid" }));
-      const hora = horaES.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+      const hora = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid" }))
+        .toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
       await enviarMensaje(NUMERO_AGENTE,
         `📩 *Mensaje de cliente*\n\n📱 +${telefono}\n💬 "${texto}"\n🕘 ${hora}`
       );
     }
 
-    // ── FLUJO DOC AUTO: ESPERANDO "LISTO" O MÁS DATOS ──
+    // ── FLUJO DOC AUTO ──
     if (esperandoDocAuto.has(telefono)) {
-      const textoNorm = normalizarTexto(texto);
-      if (["listo", "ya esta", "es todo", "nada mas"].some(p => textoNorm.includes(p))) {
+      const norm = normalizarTexto(texto);
+      if (["listo", "ya esta", "es todo", "nada mas"].some(p => norm.includes(p))) {
         esperandoDocAuto.delete(telefono);
-        await enviarMensaje(NUMERO_AGENTE, `✅ El cliente +${telefono} ha terminado de enviar documentación del siniestro de auto.`);
+        await enviarMensaje(NUMERO_AGENTE, `✅ Cliente +${telefono} terminó de enviar documentación del siniestro de auto.`);
         await enviarMensaje(telefono,
-          `✅ Perfecto, tu agente ha recibido toda la documentación y procederá con la gestión del siniestro.\n\n` +
-          `Te contactará lo antes posible. 💪\n\n` +
-          `🆘 Si la situación es urgente: *911 123 443* (24h)`
+          "✅ Tu agente ha recibido toda la documentación y procederá con la gestión.\n\nTe contactará lo antes posible. 💪\n\n🆘 Urgente: *911 123 443* (24h)"
         );
       } else {
         await enviarMensaje(NUMERO_AGENTE, `📋 Datos siniestro auto de +${telefono}:\n"${texto}"`);
         await enviarMensaje(telefono,
-          `✅ Datos recibidos y enviados a tu agente. 😊\n\n` +
-          `¿Tienes más información o fotos que añadir?\nCuando termines escribe *"listo"*.`
+          "✅ Datos enviados a tu agente. 😊\n\n¿Más información o fotos? Cuando termines escribe *listo*."
         );
       }
       return;
     }
 
-    // ── FLUJO SINIESTRO: ESPERANDO NIVEL DE URGENCIA ──
+    // ── FLUJO SINIESTRO: NIVEL ──
     if (esperandoSiniestro.has(telefono) && esperandoSiniestro.get(telefono) === "nivel") {
       if (["1", "2", "3"].includes(texto)) {
         const nivel = texto === "1" ? "urgente" : texto === "2" ? "importante" : "consulta";
         esperandoSiniestro.set(telefono, nivel);
         await enviarMensaje(telefono,
           `${texto === "1" ? "🔴" : texto === "2" ? "🟡" : "🟢"} Entendido.\n\n` +
-          `Para que tu agente pueda gestionar y hacer el seguimiento, descríbeme:\n\n` +
-          `📋 ¿Qué tipo de siniestro es? (agua, incendio, robo, accidente de auto...)\n` +
-          `📍 ¿Dónde ha ocurrido?\n📅 ¿Cuándo ocurrió?\n🔍 ¿Qué daños hay?\n` +
-          `👤 Tu nombre completo\n🪪 Tu número de póliza (si lo tienes)\n\n` +
-          `${texto === "1" ? "⚠️ Si hay riesgo inmediato llama ya al *911 123 443* (24h)\n\n" : ""}` +
-          `⚠️ *Recuerda: solo texto e imágenes, no se admiten mensajes de voz.*`
+          "Descríbeme el siniestro:\n\n" +
+          "📋 ¿Qué tipo? (agua, incendio, robo, auto...)\n" +
+          "📍 ¿Dónde?\n📅 ¿Cuándo?\n🔍 ¿Qué daños?\n" +
+          "👤 Tu nombre completo\n🪪 Número de póliza (si lo tienes)\n\n" +
+          (texto === "1" ? "⚠️ Riesgo inmediato: llama ya al *911 123 443* (24h)\n\n" : "") +
+          "⚠️ *Solo texto e imágenes, no se admiten mensajes de voz.*"
         );
       } else {
-        await enviarMensaje(telefono, "Por favor elige una opción válida:\n\n🔴 *1* - Urgente\n🟡 *2* - Importante\n🟢 *3* - Consulta");
+        await enviarMensaje(telefono,
+          "Por favor elige una opción válida:\n\n🔴 *1* Urgente · 🟡 *2* Importante · 🟢 *3* Consulta"
+        );
       }
       return;
     }
 
-    // ── FLUJO SINIESTRO: ESPERANDO DESCRIPCIÓN ──
+    // ── FLUJO SINIESTRO: DESCRIPCIÓN ──
     if (esperandoSiniestro.has(telefono) && esperandoSiniestro.get(telefono) !== "nivel") {
       const nivel = esperandoSiniestro.get(telefono);
       esperandoSiniestro.delete(telefono);
       await notificarAgente(telefono, texto, nivel);
+
       if (esSiniestroAuto(texto)) {
         esperandoDocAuto.set(telefono, true);
         await enviarMensaje(telefono,
-          `✅ He registrado tu siniestro y avisado a tu agente.\n\n` +
-          `🚗 *Veo que es un siniestro de auto.* Para agilizar la gestión necesito:\n\n` +
-          `📸 *Opción A — Parte amistoso:*\nEnvíame una foto del parte amistoso firmado\n\n` +
-          `📝 *Opción B — Datos del contrario:*\n👤 Nombre completo\n🪪 DNI\n🚘 Matrícula\n🏢 Compañía aseguradora\n📋 Número de póliza\n\n` +
-          `También puedes enviar fotos de los daños del vehículo.\n\n` +
-          `⚠️ *Solo texto e imágenes, no se admiten mensajes de voz.*\n\n` +
-          `Cuando termines de enviar todo escribe *"listo"*. 😊`
+          "✅ Siniestro registrado y agente avisado.\n\n" +
+          "🚗 *Siniestro de auto detectado.* Necesito:\n\n" +
+          "📸 *Opción A — Parte amistoso:* foto del parte firmado\n\n" +
+          "📝 *Opción B — Datos del contrario:*\n" +
+          "👤 Nombre · 🪪 DNI · 🚘 Matrícula · 🏢 Aseguradora · 📋 Póliza\n\n" +
+          "También puedes enviar fotos de los daños.\n\n" +
+          "Cuando termines escribe *listo*. 😊"
         );
       } else {
-        if (nivel === "urgente") {
-          await enviarMensaje(telefono,
-            `✅ He registrado tu siniestro y avisado a tu agente para el seguimiento.\n\n` +
-            `🔴 *Recuerda:* Si hay riesgo activo llama ahora al:\n📞 *911 123 443* (gratuito · 24h)\n\nTu agente contactará contigo lo antes posible. 💪`
-          );
-        } else if (nivel === "importante") {
-          await enviarMensaje(telefono,
-            `✅ He registrado tu siniestro y avisado a tu agente para hacer el seguimiento.\n\nTe contactará lo antes posible.\n\nSi la situación empeora: 📞 *911 123 443* (24h) 🆘`
-          );
-        } else {
-          await enviarMensaje(telefono,
-            `✅ He registrado tu consulta y avisado a tu agente.\n\nTe responderá durante el horario de atención _(L-V 9h-20:30h)_. 😊`
-          );
-        }
+        const mensajes = {
+          urgente:    "✅ Siniestro registrado y agente avisado.\n\n🔴 Si hay riesgo activo llama ahora:\n📞 *911 123 443* (gratuito · 24h)\n\nTu agente contactará contigo lo antes posible. 💪",
+          importante: "✅ Siniestro registrado y agente avisado.\n\nTe contactará lo antes posible.\n\nSi empeora: 📞 *911 123 443* (24h) 🆘",
+          consulta:   "✅ Consulta registrada y agente avisado.\n\nTe responderá en horario de atención _(L-V 9h-20:30h)_. 😊",
+        };
+        await enviarMensaje(telefono, mensajes[nivel]);
       }
       return;
     }
@@ -411,55 +484,51 @@ app.post("/webhook", async (req, res) => {
     if (esNuevo) {
       conversaciones.add(telefono);
       await enviarMensaje(telefono,
-        `👋 ¡Hola! Bienvenido/a al asistente de tu agente de *Generali Seguros*.\n\n` +
-        `Estoy aquí para ayudarte 24/7. Tu agente atiende personalmente de *L-V de 9h a 20:30h*.\n\n` +
-        `⚠️ *Importante: solo se admiten mensajes de texto e imágenes. Los mensajes de voz no son válidos.*\n\n` +
-        `¿Cómo puedo ayudarte?\n\n` +
-        `1️⃣ Información sobre seguros\n2️⃣ Solicitar cotización\n3️⃣ Realizar un pago\n4️⃣ Hablar con el agente\n5️⃣ Reportar un siniestro`
+        "👋 ¡Hola! Bienvenido/a al asistente de tu agente de *Generali Seguros*.\n\n" +
+        "Estoy aquí para ayudarte 24/7. Tu agente atiende personalmente de *L-V de 9h a 20:30h*.\n\n" +
+        "⚠️ *Solo texto e imágenes. Los mensajes de voz no son válidos.*\n\n" +
+        "¿Cómo puedo ayudarte?\n\n" +
+        "1️⃣ Información sobre seguros\n2️⃣ Solicitar cotización\n3️⃣ Realizar un pago\n4️⃣ Hablar con el agente\n5️⃣ Reportar un siniestro"
       );
       return;
     }
 
-    // ── MENÚ RÁPIDO ──
-    if (texto === "5" || texto.toLowerCase().includes("siniestro") ||
-        texto.toLowerCase().includes("accidente") || texto.toLowerCase().includes("urgente")) {
+    // ── MENÚ SINIESTRO ──
+    if (texto === "5" || ["siniestro", "accidente", "urgente"].some(p => texto.toLowerCase().includes(p))) {
       esperandoSiniestro.set(telefono, "nivel");
       if (!conversaciones.has(telefono)) conversaciones.add(telefono);
       await enviarMensaje(telefono,
-        `🆘 *Reportar un siniestro*\n\n` +
-        `Para atenderte mejor, dime el nivel de urgencia:\n\n` +
-        `🔴 *1 - URGENTE*\nDaños activos, heridos o riesgo inmediato\n\n` +
-        `🟡 *2 - IMPORTANTE*\nDaño ya ocurrido, sin riesgo activo\n\n` +
-        `🟢 *3 - CONSULTA*\nDudas sobre cobertura o tramitación\n\n` +
-        `⚠️ *Solo texto e imágenes, no se admiten mensajes de voz.*`
+        "🆘 *Reportar un siniestro*\n\n¿Cuál es el nivel de urgencia?\n\n" +
+        "🔴 *1 — URGENTE:* Daños activos, heridos o riesgo inmediato\n" +
+        "🟡 *2 — IMPORTANTE:* Daño ya ocurrido, sin riesgo activo\n" +
+        "🟢 *3 — CONSULTA:* Dudas sobre cobertura o tramitación\n\n" +
+        "⚠️ *Solo texto e imágenes, no se admiten mensajes de voz.*"
       );
       return;
     }
 
+    // ── MENÚS 1-4 ──
     const menus = {
-      "1": "¿Sobre qué tipo de seguro necesitas información?\n\n🏠 *Hogar* · 🚗 *Auto* · ❤️ *Vida* · 🏥 *Salud* · 🦷 *Dental* · 🏢 *Empresas* · 💰 *Ahorro*\n\nEscríbeme el que te interese y te cuento todo.",
-      "2": "📋 *Solicitar cotización*\n\nDime qué tipo de seguro te interesa y te indico exactamente qué documentación necesitamos:\n\n🏠 Hogar · 🚗 Auto · ❤️ Vida · 🏥 Salud · 🏢 Empresas · 💰 Ahorro",
-      "3": "💳 *Pago de tu seguro Generali*\n\nPuedes realizar tu pago de forma fácil, rápida y segura:\n\n1️⃣ Entra en:\n🔗 https://www.generali.es/servicios-generali/pago-con-tarjeta/pasarela\n\n2️⃣ Introduce tu *número de recibo*\n\n3️⃣ Elige:\n📱 *Bizum* o 💳 *Tarjeta bancaria*\n\n✅ Pago 100% seguro con confirmación inmediata. 😊",
-      "4": "Perfecto, voy a avisar a tu agente ahora mismo. ⏳\n\n¿Puedes indicarme tu *nombre* y el *motivo* de la consulta para que pueda prepararse?\n\n🕘 Tu agente atiende de *L-V de 9h a 20:30h*\n\n⚠️ *Solo texto, no se admiten mensajes de voz.*",
+      "1": "¿Sobre qué tipo de seguro necesitas información?\n\n🏠 *Hogar* · 🚗 *Auto* · ❤️ *Vida* · 🏥 *Salud* · 🦷 *Dental* · 🏢 *Empresas* · 💰 *Ahorro*\n\nEscríbeme el que te interesa y te cuento todo.",
+      "2": "📋 *Solicitar cotización*\n\nDime qué tipo de seguro te interesa y te indico la documentación que necesitamos:\n\n🏠 Hogar · 🚗 Auto · ❤️ Vida · 🏥 Salud · 🏢 Empresas · 💰 Ahorro",
+      "3": "💳 *Pago de tu seguro Generali*\n\n1️⃣ Entra en:\n🔗 https://www.generali.es/servicios-generali/pago-con-tarjeta/pasarela\n\n2️⃣ Introduce tu *número de recibo*\n\n3️⃣ Elige: 📱 *Bizum* o 💳 *Tarjeta bancaria*\n\n✅ Pago 100% seguro con confirmación inmediata. 😊",
+      "4": "Perfecto, voy a avisar a tu agente. ⏳\n\n¿Puedes indicarme tu *nombre* y el *motivo* de la consulta?\n\n🕘 Agente disponible *L-V de 9h a 20:30h*",
     };
-
     if (menus[texto]) {
       await enviarMensaje(telefono, menus[texto]);
       return;
     }
 
-    // FIX 4: FAQ PRIMERO, IA después (según instrucciones: IA es último recurso)
+    // ── FAQ BÁSICO ──
     const respuestaFAQ = buscarRespuestaFAQ(texto);
     if (respuestaFAQ) {
       await enviarMensaje(telefono, respuestaFAQ);
       return;
     }
 
-    // ── IA: CONSULTAS COMPLEJAS SOBRE PRODUCTOS (último recurso) ──
+    // ── IA: CONSULTAS SOBRE PRODUCTOS (último recurso) ──
     limpiarContextosAntiguos();
     const contextoCliente = obtenerContextoConversacion(telefono);
-
-    // FIX 5: detectarProducto del módulo devuelve productId (string), no objeto
     const productoIdDetectado = detectarProducto(texto);
     const productoIdParaIA = productoIdDetectado || contextoCliente.productoId;
 
@@ -475,9 +544,9 @@ app.post("/webhook", async (req, res) => {
 
     // ── RESPUESTA GENÉRICA ──
     await enviarMensaje(telefono,
-      `Gracias por tu mensaje. 😊\n\n` +
-      `Para darte la mejor atención, elige una opción:\n\n` +
-      `1️⃣ Información sobre seguros\n2️⃣ Solicitar cotización\n3️⃣ Realizar un pago\n4️⃣ Hablar con el agente\n5️⃣ Reportar un siniestro`
+      "Gracias por tu mensaje. 😊\n\n" +
+      "Para darte la mejor atención, elige una opción:\n\n" +
+      "1️⃣ Información sobre seguros\n2️⃣ Solicitar cotización\n3️⃣ Realizar un pago\n4️⃣ Hablar con el agente\n5️⃣ Reportar un siniestro"
     );
 
   } catch (error) {
@@ -489,8 +558,8 @@ app.post("/webhook", async (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     status: "✅ Bot Generali Seguros activo",
-    modo: "🟢 24/7 activo",
     ia: ANTHROPIC_API_KEY ? `✅ Claude AI (${ANTHROPIC_MODEL})` : "⚠️ ANTHROPIC_API_KEY no configurada",
+    drive: GOOGLE_REFRESH_TOKEN ? "✅ Google Drive conectado" : "⚠️ Google Drive no configurado",
     productos_cargados: Object.keys(PRODUCTS_DATA).length,
     timestamp: new Date().toISOString()
   });
