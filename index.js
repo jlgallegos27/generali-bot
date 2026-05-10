@@ -79,6 +79,10 @@ function buscarRespuestaFAQ(texto) {
 }
 
 function esPreguntaCompleja(texto) {
+  // Siempre true: cualquier mensaje con producto detectado va a la IA
+  return true;
+}
+function esPreguntaComplejaOLD(texto) {
   const textoNorm = normalizarTexto(texto);
   const indicadores = [
     "cubre", "cubriria", "incluye", "excluye", "limite", "limites", "capital", "carencia",
