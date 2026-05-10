@@ -32,54 +32,24 @@ const esperandoDocAuto = new Map();
 const contextoConversaciones = new Map(); // telefono → { productoId, mensajes, actualizado }
 
 // ─── RESPUESTAS PREDEFINIDAS POR PALABRAS CLAVE ──────────────
+// SOLO para operaciones directas: pagos, cuadro médico, horario.
+// Todo lo relacionado con productos va a la IA.
 const RESPUESTAS_FAQ = [
   {
-    palabras: ["hogar", "casa", "vivienda", "piso", "apartamento"],
-    respuesta: "🏠 *Seguro de Hogar Generali*\n\nNuestro seguro de hogar cubre daños por agua, incendio, robo, responsabilidad civil y mucho más.\n\nPara prepararte una cotización personalizada necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n📐 Metros cuadrados\n🏘️ ¿Piso o casa?\n\nEnvíame estos datos y tu agente te preparará la mejor oferta. 😊"
-  },
-  {
-    palabras: ["auto", "coche", "carro", "vehículo", "vehiculo", "automóvil", "automovil"],
-    respuesta: "🚗 *Seguro de Auto Generali*\n\nOfrecemos coberturas a terceros, todo riesgo y modalidades intermedias adaptadas a tu perfil.\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n🚘 Marca, modelo y año del vehículo\n📋 Matrícula\n\n📸 Documentación:\n📷 DNI (anverso y reverso)\n📷 Permiso de conducir (anverso y reverso)\n📷 Ficha técnica\n📷 Permiso de circulación\n📷 Póliza anterior (si tienes)\n\n⚠️ Tus datos son tratados con total confidencialidad conforme a la LOPD. 😊"
-  },
-  {
-    palabras: ["vida", "fallecimiento", "muerte", "deceso", "supervivencia"],
-    respuesta: "❤️ *Seguro de Vida Generali*\n\nProtege a tu familia con nuestros seguros de vida. Disponemos de distintas modalidades según tus necesidades y presupuesto.\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n💰 Capital que deseas asegurar\n\nEnvíame estos datos y tu agente te preparará varias opciones. 😊"
-  },
-  {
-    palabras: ["dental", "dentista", "dientes", "boca", "ortodoncia"],
-    respuesta: "🦷 *Cobertura Dental Generali*\n\nConsulta nuestra red de dentistas colaboradores:\n\n🔗 https://generali-dental.dentycard.es/clientes/landing\n\nPara incluir cobertura dental en tu seguro de salud necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n👨‍👩‍👧 ¿Es solo para ti o también para familiares?\n\nEnvíame estos datos y tu agente te preparará la mejor opción. 😊"
-  },
-  {
-    palabras: ["salud", "médico", "medico", "médica", "medica", "sanitario", "hospital", "especialista"],
-    respuesta: "🏥 *Seguro de Salud Generali*\n\nAccede a los mejores especialistas sin listas de espera.\n\n🔗 Consulta el cuadro médico completo:\nhttps://www.generali.es/cuadromedico\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n👨‍👩‍👧 ¿Es solo para ti o también para familiares?\n\nEnvíame estos datos y tu agente te contactará enseguida. 😊"
-  },
-  {
-    palabras: ["empresa", "pyme", "comercio", "local", "oficina", "autonomo", "autónomo"],
-    respuesta: "🏢 *Seguro de Empresas Generali*\n\nProtege tu negocio con coberturas adaptadas: responsabilidad civil, daños materiales, pérdida de beneficios y más.\n\nPara prepararte una cotización necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección del negocio\n🏭 Actividad de la empresa\n👥 Número de empleados\n\nEnvíame estos datos y tu agente te contactará enseguida. 😊"
-  },
-  {
-    palabras: ["ahorro", "inversión", "inversion", "plan", "jubilación", "jubilacion", "pensión", "pension", "futuro"],
-    respuesta: "💰 *Seguros de Ahorro e Inversión Generali*\n\nPlanifica tu futuro con rentabilidad garantizada y ventajas fiscales.\n\nPara prepararte una propuesta personalizada necesito:\n\n👤 Nombre completo\n🪪 DNI\n🎂 Fecha de nacimiento\n📍 Dirección completa\n💰 Cantidad que deseas ahorrar mensualmente\n\nEnvíame estos datos y tu agente te contactará enseguida. 😊"
-  },
-  {
     palabras: ["pago", "recibo", "factura", "cobro", "bizum", "tarjeta"],
-    respuesta: "💳 *Pago de tu seguro Generali*\n\nPuedes realizar tu pago de forma fácil, rápida y segura:\n\n*Pasos a seguir:*\n1️⃣ Entra en el siguiente enlace:\n🔗 https://www.generali.es/servicios-generali/pago-con-tarjeta/pasarela\n\n2️⃣ Introduce tu *número de recibo* (lo encuentras en tu carta de pago)\n\n3️⃣ Elige tu forma de pago:\n📱 *Bizum*\n💳 *Tarjeta bancaria*\n\n✅ El pago es 100% seguro y recibirás confirmación inmediata.\n\nSi tienes cualquier problema escríbeme y te ayudo. 😊"
+    respuesta: "💳 *Pago de tu seguro Generali*\n\nPuedes realizar tu pago de forma fácil, rápida y segura:\n\n1️⃣ Entra en:\n🔗 https://www.generali.es/servicios-generali/pago-con-tarjeta/pasarela\n\n2️⃣ Introduce tu *número de recibo*\n\n3️⃣ Elige: 📱 *Bizum* o 💳 *Tarjeta bancaria*\n\n✅ El pago es 100% seguro y recibirás confirmación inmediata.\n\nSi tienes cualquier problema escríbeme y te ayudo. 😊"
   },
   {
-    palabras: ["cuadro", "medicos", "médicos", "especialistas", "clinica", "clínica"],
-    respuesta: "🏥 *Cuadro Médico Generali*\n\n🔗 Médicos y especialistas:\nhttps://www.generali.es/cuadromedico\n\n🦷 Dentistas:\nhttps://generali-dental.dentycard.es/clientes/landing\n\nSi necesitas ayuda para encontrar un especialista en tu zona, dímelo y te ayudo. 😊"
+    palabras: ["cuadro medico", "cuadro médico", "medicos", "médicos", "dentistas", "clinica", "clínica"],
+    respuesta: "🏥 *Cuadro Médico Generali*\n\n🔗 Médicos y especialistas:\nhttps://www.generali.es/cuadromedico\n\n🦷 Dentistas:\nhttps://generali-dental.dentycard.es/clientes/landing\n\nSi necesitas ayuda para encontrar un especialista en tu zona, dímelo. 😊"
   },
   {
-    palabras: ["precio", "coste", "costo", "cuánto", "cuanto", "presupuesto", "cotización", "cotizacion"],
-    respuesta: "📋 *Solicitar cotización*\n\nCon mucho gusto preparamos un presupuesto personalizado.\n\nDime primero:\n¿Qué tipo de seguro te interesa?\n\n🏠 Hogar · 🚗 Auto · ❤️ Vida · 🏥 Salud · 🏢 Empresas · 💰 Ahorro\n\nAsí te indico exactamente qué documentación necesitamos. 😊"
+    palabras: ["horario", "hora", "cuando atiendes", "disponible", "cuando puedo llamar"],
+    respuesta: "🕘 *Horario de atención*\n\nTu agente está disponible:\n📅 Lunes a Viernes · ⏰ 9:00h a 20:30h\n\nEste asistente está disponible *24 horas, 7 días a la semana*. 😊"
   },
   {
-    palabras: ["horario", "hora", "cuando", "cuándo", "disponible", "atención", "atencion"],
-    respuesta: "🕘 *Horario de atención*\n\nTu agente está disponible:\n📅 Lunes a Viernes\n⏰ 9:00h a 20:30h\n\nEste asistente está disponible *24 horas, 7 días a la semana* para ayudarte. 😊"
-  },
-  {
-    palabras: ["gracias", "ok", "vale", "perfecto", "genial", "bien"],
-    respuesta: "¡Con mucho gusto! 😊 Si necesitas cualquier otra cosa, aquí estamos. Escribe *1* para ver el menú de opciones."
+    palabras: ["gracias", "muchas gracias", "perfecto", "genial", "de acuerdo"],
+    respuesta: "¡Con mucho gusto! 😊 Si necesitas cualquier otra cosa, aquí estamos. Escribe *1* para ver el menú."
   }
 ];
 
